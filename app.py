@@ -90,8 +90,17 @@ def main_view():
 
     elif menu == "Khám Bệnh":
         st.subheader("📋 Không Gian Khám Bệnh")
-        t1, t2 = st.tabs(["📅 Xử lý ca hôm nay", "⚠️ Bệnh nhân lỡ hẹn"])
+        
+        # 1. BỘ CHỌN NGÀY (Để xem lịch hôm qua, hôm nay, ngày mai)
+        c_date, c_empty = st.columns([3, 7])
+        with c_date:
+            sel_date = st.date_input("📅 Chọn ngày xem lịch", value=datetime.now().date())
+        
+        date_str = sel_date.strftime('%d/%m/%Y')
+        t1, t2 = st.tabs([f"📅 Danh sách ca ngày {date_str}", "⚠️ Bệnh nhân lỡ hẹn"])
+        
         with t1:
+            # Thông báo in PDF (Giữ nguyên logic của bạn)
             if 'recent_pdf_bytes' in st.session_state:
                 st.success(f"✅ Đã khám xong cho: **{st.session_state['recent_patient_name']}**")
                 cb1, _ = st.columns([3, 7])
@@ -103,47 +112,67 @@ def main_view():
                         st.rerun()
                 st.markdown("---")
 
-            records = ctrl.get_waiting_records(db, st.session_state['doctor_id'], datetime.now().date())
+            # GỌI HÀM MỚI TỪ CONTROLLER
+            records = ctrl.get_all_records_by_date(db, st.session_state['doctor_id'], sel_date)
+            
             if not records: 
-                st.info("Hiện không có bệnh nhân đang chờ.")
+                st.info(f"Hiện không có bệnh nhân nào trong ngày {date_str}.")
             else:
+                # Hiện thống kê nhanh
+                waiting_count = len([x for x in records if x.Status == 'Chờ khám'])
+                done_count = len([x for x in records if x.Status == 'Đã khám'])
+                st.write(f"📊 **Thống kê:** {len(records)} ca (⏳ Chờ: {waiting_count} | ✅ Xong: {done_count})")
+                
                 for idx, r in enumerate(records):
-                    with st.expander(f"🔴 Ca #{idx+1}: {r.patient.Full_name} (SĐT: {r.patient.Phone})", expanded=(idx==0)):
-                        col_ex, col_hi = st.columns([6, 4])
-                        with col_ex:
-                            with st.form(f"f_{r.Record_id}"):
-                                st.write(f"**Lý do:** {r.Symptoms}")
-                                diag = st.text_area("Chẩn đoán (*)", height=80)
-                                proc = st.text_area("Thủ thuật điều trị (Nếu có)", height=80, placeholder="- Lấy cao răng / Cắt chỉ...")
-                                treat = st.text_area("Đơn thuốc (mỗi loại 1 dòng)", height=100)
-                                st.markdown("---")
-                                re_ex = st.checkbox("Hẹn tái khám")
-                                re_date = st.date_input("Ngày hẹn", value=datetime.now().date())
-                                cs, cd = st.columns([7, 3])
-                                with cs:
-                                    if st.form_submit_button("Lưu & Xuất PDF", type="primary", use_container_width=True):
-                                        if diag:
-                                            ctrl.complete_examine(db, r.Record_id, diag, treat, proc)
-                                            st.session_state['recent_pdf_bytes'] = generate_prescription_pdf(
-                                                r.patient.Full_name, r.patient.Dob, r.patient.Gender, r.patient.Phone, r.patient.Address, 
-                                                diag, proc, treat, name_display)
-                                            st.session_state['recent_patient_name'] = r.patient.Full_name
-                                            if re_ex: ctrl.add_to_queue(db, r.patient.Patient_id, st.session_state['doctor_id'], re_date)
+                    icon = "🔴" if r.Status == 'Chờ khám' else "🟢"
+                    with st.expander(f"{icon} Ca #{idx+1}: {r.patient.Full_name} ({r.Status})", expanded=(idx==0 and r.Status=='Chờ khám')):
+                        if r.Status == 'Chờ khám':
+                            # --- ĐÂY LÀ NƠI KHÔI PHỤC CÁI FORM KHÁM BỆNH ---
+                            col_ex, col_hi = st.columns([6, 4])
+                            with col_ex:
+                                with st.form(f"f_{r.Record_id}"):
+                                    st.write(f"**Lý do khám:** {r.Symptoms}")
+                                    diag = st.text_area("Chẩn đoán (*)", height=80)
+                                    proc = st.text_area("Thủ thuật điều trị (Nếu có)", height=80, placeholder="- Lấy cao răng / Cắt chỉ...")
+                                    treat = st.text_area("Đơn thuốc (mỗi loại 1 dòng)", height=100)
+                                    st.markdown("---")
+                                    re_ex = st.checkbox("Hẹn tái khám")
+                                    re_date = st.date_input("Ngày hẹn", value=datetime.now().date())
+                                    
+                                    cs, cd = st.columns([7, 3])
+                                    with cs:
+                                        if st.form_submit_button("Lưu & Xuất PDF", type="primary", use_container_width=True):
+                                            if diag:
+                                                ctrl.complete_examine(db, r.Record_id, diag, treat, proc)
+                                                # Dùng hàm export từ utils
+                                                st.session_state['recent_pdf_bytes'] = generate_prescription_pdf(
+                                                    r.patient.Full_name, r.patient.Dob, r.patient.Gender, r.patient.Phone, r.patient.Address, 
+                                                    diag, proc, treat, name_display)
+                                                st.session_state['recent_patient_name'] = r.patient.Full_name
+                                                if re_ex: ctrl.add_to_queue(db, r.patient.Patient_id, st.session_state['doctor_id'], re_date)
+                                                st.rerun()
+                                            else: st.error("Thiếu chẩn đoán!")
+                                    with cd:
+                                        if st.form_submit_button("Hủy ca", use_container_width=True): 
+                                            ctrl.cancel_record(db, r.Record_id)
                                             st.rerun()
-                                        else: 
-                                            st.error("Thiếu chẩn đoán!")
-                                with cd:
-                                    if st.form_submit_button("Hủy ca", use_container_width=True): 
-                                        ctrl.cancel_record(db, r.Record_id)
-                                        st.rerun()
-                        with col_hi:
-                            st.write("📂 **Lịch sử bệnh án**")
-                            history = ctrl.get_patient_history(db, r.Patient_id, r.Record_id)
-                            if not history: 
-                                st.caption("Chưa có lịch sử.")
-                            for h in history[:3]:
-                                proc_display = f"<br>Thủ thuật: {h.Notes}" if h.Notes else ""
-                                st.markdown(f'<div class="history-box"><b style="color:#38bdf8;">{h.Visit_date.strftime("%d/%m/%Y")}</b><br>Bệnh: {h.Diagnosis}{proc_display}<br>Thuốc: {h.Treatment[:50]}...</div>', unsafe_allow_html=True)
+                            with col_hi:
+                                st.write("📂 **Lịch sử cũ của BN này**")
+                                history = ctrl.get_patient_history(db, r.Patient_id, r.Record_id)
+                                for h in history[:3]:
+                                    st.markdown(f'<div class="history-box"><b style="color:#38bdf8;">{h.Visit_date.strftime("%d/%m/%Y")}</b><br>Bệnh: {h.Diagnosis}</div>', unsafe_allow_html=True)
+                        else:
+                            # HIỂN THỊ NẾU CA ĐÃ KHÁM XONG (Chế độ xem lại)
+                            st.success(f"**Kết quả chẩn đoán:** {r.Diagnosis}")
+                            st.info(f"**Đơn thuốc:** {r.Treatment}")
+                            if r.Notes: st.write(f"**Thủ thuật:** {r.Notes}")
+                            # Thêm nút in lại PDF nhanh nếu bác sĩ cần
+                            if st.button("🖨️ In lại phiếu khám", key=f"reprint_{r.Record_id}"):
+                                st.session_state['recent_pdf_bytes'] = generate_prescription_pdf(
+                                    r.patient.Full_name, r.patient.Dob, r.patient.Gender, r.patient.Phone, r.patient.Address, 
+                                    r.Diagnosis, r.Notes if r.Notes else "", r.Treatment, name_display)
+                                st.session_state['recent_patient_name'] = r.patient.Full_name
+                                st.rerun()
 
         with t2:
             missed = ctrl.get_missed_appointments(db, st.session_state['doctor_id'])
@@ -177,7 +206,7 @@ def main_view():
                     col_title.markdown(f"<h3 style='margin-top:0;'>👁️ Chi Tiết: {p_obj.Full_name}</h3>", unsafe_allow_html=True)
                     if col_close.button("❌ Đóng bảng", use_container_width=True): close_action_panel()
                     
-                    st.write(f"**Ngày sinh:** {p_obj.Dob.strftime('%d/%m/%Y') if p.Dob else 'N/A'} | **Giới tính:** {p_obj.Gender} | **SĐT:** {p_obj.Phone}")
+                    st.write(f"**Ngày sinh:** {p_obj.Dob.strftime('%d/%m/%Y') if p_obj.Dob else 'N/A'} | **Giới tính:** {p_obj.Gender} | **SĐT:** {p_obj.Phone}")
                     st.write(f"**Địa chỉ:** {p_obj.Address}")
                     st.markdown("---")
                     with st.form("book_now"):
@@ -187,11 +216,42 @@ def main_view():
                             st.success("Đã xếp lịch!")
                             time.sleep(1); close_action_panel()
                             
-                    st.write("📂 **Lịch sử khám:**")
+                    st.write("📂 **Lịch sử khám (Nhấn để xem chi tiết):**")
                     history = ctrl.get_patient_history(db, p_id)
-                    if not history: st.info("Bệnh nhân chưa có lịch sử.")
+                    if not history: 
+                        st.info("Bệnh nhân chưa có lịch sử.")
                     for h in history:
-                        st.markdown(f"- Ngày {h.Visit_date.strftime('%d/%m/%Y')}: {h.Diagnosis} (Thủ thuật: {h.Notes if h.Notes else 'Không'})")
+                        # Tạo các dòng lịch sử có nút bấm
+                        col_h1, col_h2 = st.columns([8, 2])
+                        col_h1.markdown(f"📅 **Ngày {h.Visit_date.strftime('%d/%m/%Y')}**: {h.Diagnosis[:40]}...")
+                        if col_h2.button("Xem 👁️", key=f"rec_{h.Record_id}", use_container_width=True):
+                            st.session_state.action_type = 'view_record'
+                            st.session_state.action_record_id = h.Record_id
+                            st.rerun()
+                
+                elif st.session_state.action_type == 'view_record':
+                    r_obj = ctrl.get_record_by_id(db, st.session_state.action_record_id)
+                    col_title.markdown(f"<h3 style='margin-top:0;'>📜 Chi Tiết Ca Khám: {r_obj.Visit_date.strftime('%d/%m/%Y')}</h3>", unsafe_allow_html=True)
+                    
+                    # Nút quay lại hồ sơ bệnh nhân
+                    if col_close.button("⬅️ Quay lại", use_container_width=True): 
+                        st.session_state.action_type = 'view'
+                        st.rerun()
+                    
+                    # Hiển thị nội dung đầy đủ
+                    st.markdown(f"**Bác sĩ khám:** {r_obj.doctor.Full_name}")
+                    st.info(f"**1. Chẩn đoán:**\n\n{r_obj.Diagnosis}")
+                    st.warning(f"**2. Thủ thuật điều trị:**\n\n{r_obj.Notes if r_obj.Notes else 'Không có'}")
+                    st.success(f"**3. Đơn thuốc & Dặn dò:**\n\n{r_obj.Treatment}")
+                    
+                    st.markdown("---")
+                    # Cho phép in luôn PDF tại đây nếu cần
+                    if st.button("🖨️ Xuất lại phiếu PDF này", type="primary"):
+                        st.session_state['recent_pdf_bytes'] = generate_prescription_pdf(
+                            p_obj.Full_name, p_obj.Dob, p_obj.Gender, p_obj.Phone, p_obj.Address, 
+                            r_obj.Diagnosis, r_obj.Notes if r_obj.Notes else "", r_obj.Treatment, r_obj.doctor.Full_name)
+                        st.session_state['recent_patient_name'] = p_obj.Full_name
+                        st.rerun()
 
                 elif st.session_state.action_type == 'edit':
                     col_title.markdown(f"<h3 style='margin-top:0;'>✏️ Sửa Hồ Sơ: {p_obj.Full_name}</h3>", unsafe_allow_html=True)
@@ -293,26 +353,30 @@ def main_view():
                         st.markdown("<hr style='margin:0; padding:0; margin-bottom: 5px; opacity: 0.2'>", unsafe_allow_html=True)
 
         with t2:
-            with st.form("add"):
-                st.info(f"Hồ sơ sẽ được gán tự động cho BS. {name_display}")
+            with st.form("add", clear_on_submit=True):
                 c1, c2 = st.columns(2)
                 with c1: 
                     n = st.text_input("Họ tên (*)")
-                    d = st.date_input("Ngày sinh", min_value=datetime(1900,1,1), max_value=datetime.now().date(), value=datetime(1995,1,1))
+                    d = st.date_input("Ngày sinh", min_value=datetime(1900,1,1), value=datetime(1995,1,1))
                     g = st.selectbox("Giới tính", ["Nam", "Nữ"])
                 with c2: 
                     ph = st.text_input("SĐT")
-                    ad = st.text_area("Địa chỉ", height=120)
+                    # Lấy danh sách bác sĩ để chọn
+                    docs = ctrl.get_all_doctors(db) if hasattr(ctrl, 'get_all_doctors') else []
+                    doc_dict = {f"BS. {doc.Full_name}": doc.Doctor_id for doc in docs}
+                    doc_sel = st.selectbox("Bác sĩ phụ trách", list(doc_dict.keys()))
+                    
+                    v_date = st.date_input("Ngày khám", value=datetime.now().date())
                 
-                if st.form_submit_button("Tạo Hồ Sơ & Khám Ngay", type="primary"):
+                ad = st.text_area("Địa chỉ")
+                
+                if st.form_submit_button("Tạo Hồ Sơ & Đăng Ký Khám", type="primary"):
                     if n: 
-                        result = ctrl.add_new_patient_and_queue(db, n, d, g, ph, ad, st.session_state['doctor_id'])
-                        if result == "already_in_queue": st.warning("⚠️ Bệnh nhân này đã có mặt trong hàng đợi hôm nay!")
-                        elif result == "old_patient":
-                            st.success("🔄 Tìm thấy hồ sơ cũ! Đã đưa vào hàng chờ.")
-                            time.sleep(1.5); st.rerun()
+                        # Truyền thêm v_date và ID bác sĩ được chọn vào
+                        res = ctrl.add_new_patient_and_queue(db, n, d, g, ph, ad, doc_dict[doc_sel], v_date)
+                        if res == "already_in_queue": st.warning("⚠️ Bệnh nhân đã có trong hàng chờ!")
                         else:
-                            st.success("✅ Đã tạo mới & xếp lịch thành công!")
+                            st.success(f"✅ Đã tạo hồ sơ cho {n} và xếp lịch khám ngày {v_date.strftime('%d/%m/%Y')}!")
                             time.sleep(1); st.rerun()
                     else: st.error("Tên không được để trống!")
     db.close()
