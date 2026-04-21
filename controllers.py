@@ -90,7 +90,11 @@ class ClinicController:
         return query.order_by(MedicalRecord.Visit_date.desc()).all()
 
     @staticmethod
-    def add_new_patient_and_queue(db, fullname, dob, gender, phone, address, doctor_id):
+    def get_all_doctors(db):
+        return db.query(Doctor).all()
+    
+    @staticmethod
+    def add_new_patient_and_queue(db, fullname, dob, gender, phone, address, doctor_id, visit_date):
         existing_patient = db.query(Patient).filter(
             Patient.Full_name == fullname, Patient.Dob == dob, Patient.Phone == phone
         ).first()
@@ -108,14 +112,20 @@ class ClinicController:
         existing_queue = db.query(MedicalRecord).filter(
             MedicalRecord.Patient_id == patient_id_to_use,
             MedicalRecord.Doctor_id == doctor_id,
-            MedicalRecord.Visit_date == datetime.now().date(),
+            MedicalRecord.Visit_date == visit_date,
             MedicalRecord.Status == 'Chờ khám'
         ).first()
 
         if existing_queue:
             return "already_in_queue"
 
-        new_r = MedicalRecord(Patient_id=patient_id_to_use, Doctor_id=doctor_id, Visit_date=datetime.now().date(), Status='Chờ khám', Symptoms='Khám mới')
+        new_r = MedicalRecord(
+            Patient_id = patient_id_to_use, 
+            Doctor_id = doctor_id, 
+            Visit_date = visit_date, # Đã có tham số để sử dụng
+            Status = 'Chờ khám', 
+            Symptoms = 'Khám mới'
+        )
         db.add(new_r)
         db.commit()
         return status_msg
@@ -140,3 +150,16 @@ class ClinicController:
     @staticmethod
     def get_all_patients_list(db):
         return db.query(Patient).order_by(Patient.Patient_id.asc()).all()
+    
+    @staticmethod
+    def get_all_records_by_date(db, doctor_id, visit_date):
+        # Lấy tất cả hồ sơ (Chờ khám + Đã khám) của một ngày cụ thể
+        return db.query(MedicalRecord).filter(
+            MedicalRecord.Visit_date == visit_date,
+            MedicalRecord.Doctor_id == doctor_id
+        ).order_by(MedicalRecord.Status.desc()).all()
+    
+    @staticmethod
+    def get_record_by_id(db, record_id):
+        # Lấy chi tiết một ca khám dựa trên ID
+        return db.query(MedicalRecord).filter(MedicalRecord.Record_id == record_id).first()
